@@ -1,0 +1,386 @@
+<html>
+	<head>
+		<title>PWM</title>
+		<meta name="viewport" content="width=device-width, user-scalable=no" />
+
+		<!-- arx glue logic -->
+		<!--<script type="text/javascript" src="iRacingARX.js"></script>-->
+
+		<!-- servo sound logic -->
+		<script type="text/javascript" src="soundServo.js"></script>
+
+		<!-- 5 bar kinematics -->
+		<script type="text/javascript" src="fivebarKinematics.js"></script>
+
+		<script>
+			// limits of servo angles
+			var angLim = [ {min:-80, max: 60, step: 0.5}, {min:-60, max: 80, step: 0.5} ]; 
+			var angOffset = [ 40, 135];
+			var ang = [45, 135];
+
+			// limits of cartisian coordinates
+			var posLim = [ {min: -4, max: 4, step: 0.1},  {min: 2, max: 7, step: 0.1}];
+			var pos = [0, 3];
+			var target = [0, 3];
+			var done = true;
+			var speed = 0.5; // inches per second
+			var interval = 10;
+			var grid = [[0,3]];
+
+			window.onload= function() {setPosition(0, 4)};
+			window.setInterval(processMove, interval);
+			window.setInterval(moveDraw, interval);
+
+
+			var mode = -1;
+			var outerTeeth = 96;
+			var innerTeeth = 30;
+			var innerPct = 0.95;
+			function initDraw(m)
+			{
+				if(m == 1)
+					createGrid();
+				mode = m;
+			}
+
+			function moveDraw()
+			{
+				switch(mode)
+				{
+				case 1: if(done) moveGrid(); break;
+				case 2: if(done) moveSine(); break;
+				case 3: if(done) moveRandom(); break;
+				case 4: if(done) moveSpyrograph(outerTeeth, innerTeeth, innerPct); break;
+				case 5: if(done) moveSweep(); break;
+				default: done = true; break;
+				}
+			}
+
+			function moveRandom()
+			{
+				goToXY( Math.random() * (posLim[0].max - posLim[0].min) + posLim[0].min, 
+					Math.random() * (posLim[1].max - posLim[1].min) + posLim[1].min); 
+			}
+
+			var angle = 0;
+			function moveSine()
+			{
+				var rX = posLim[0].max - posLim[0].min;
+				var cX = posLim[0].min + rX / 2;
+
+				var rY = posLim[1].max - posLim[1].min;
+				var cY = posLim[1].min + rY / 2;
+
+				var r = Math.min(rX/2, rY/2);
+
+				var angleStep = 142 / 57.2958;
+				angle += angleStep;
+
+				goToXY( cX + r * Math.cos(angle), cY + r * Math.sin(angle));
+			}
+
+			function createGrid()
+			{
+				grid = []; // clear grid
+
+				var step = 0.5;
+				var xMin = posLim[0].min;
+				var xMax = posLim[0].max;
+				var yMin = posLim[1].min;
+				var yMax = posLim[1].max;
+
+				grid.push([xMin, yMin]);
+
+				for(var y = yMin; y <= yMax; y += 2*step)
+				{
+					grid.push([xMax,y]);
+					grid.push([xMax,y+step]);
+					grid.push([xMin,y+step]);
+					grid.push([xMin,y+2*step]);
+				}
+
+				for(var x = xMax; x >= xMin; x -= 2*step)
+				{
+					grid.push([x,yMin]);
+					grid.push([x-step,yMin]);
+					grid.push([x-step,yMax]);
+					grid.push([x-2*step,yMax]);
+				}
+			}
+
+			function moveGrid()
+			{
+				if(grid[0] != null)
+				{
+					var mov = grid.shift();
+					goToXY( mov[0], mov[1]);
+				}
+			}
+
+			var thetaOuter = 0;
+			var thetaInner = 0;
+			var TWOPI = Math.PI * 2;
+			var thetaStep = TWOPI / 360;
+			function moveSpyrograph(outerTeeth, innerTeeth, innerPct)
+			{
+				var rX = posLim[0].max - posLim[0].min;
+				var cX = posLim[0].min + rX / 2;
+
+				var rY = posLim[1].max - posLim[1].min;
+				var cY = posLim[1].min + rY / 2;
+
+				var r = Math.min(rX/2, rY/2);
+
+				// work out gear ratio
+				var ratio = outerTeeth / innerTeeth;
+
+				// rotae gears, and limit to twoPi for our sanity
+				thetaOuter += thetaStep;
+				if(thetaOuter >= TWOPI)
+					thetaOuter -= TWOPI;
+
+				thetaInner -= thetaStep * ratio;
+				if(thetaInner <= -TWOPI)
+					thetaInner += TWOPI;
+
+				var rOuter = 1;
+				var rInner = rOuter / ratio;
+				var rOI = rOuter - rInner;
+				var rInnerPen = rInner * innerPct;
+
+				// work out offset of pen around inner gear
+				var iX = rInnerPen * Math.cos(thetaInner);
+				var iY = rInnerPen * Math.sin(thetaInner);
+
+				// work out offset of inner gear around outer gear
+				var oX = rOI * Math.cos(thetaOuter);
+				var oY = rOI * Math.sin(thetaOuter);
+
+				// scale and position on drawing surface
+				var nX = cX + (iX + oX) * r;
+				var nY = cY + (iY + oY) * r;
+
+				// move
+				goToXY( nX, nY);
+
+			}
+
+			function moveSweep()
+			{
+				// rpm to deg/ms
+				var dgpms = speed * 360 / (60 * 1000);
+				var step = dgpms * interval;
+
+				var chan = 0;
+				if(ang[chan] < angLim[chan].max)
+					ang[chan] += step;
+				document.getElementById('sDAng'+chan).value = ang[chan]; 
+				pos = fiveBar.forwardKinematics(ang[0]+angOffset[0], ang[1]+angOffset[1]);
+
+				validatePositionAndDisplay(false);
+			}
+
+			function setDRange(chan)
+			{
+				angLim[chan].min = parseFloat(document.getElementById('sDMin'+chan).value);
+				angLim[chan].max = parseFloat(document.getElementById('sDMax'+chan).value);
+
+				document.getElementById('sDAng'+chan).min = angLim[chan].min;
+				document.getElementById('sDAng'+chan).max = angLim[chan].max;
+
+				var isChange = false;
+				if(ang[chan] < angLim[chan].min)
+				{
+					ang[chan] = angLim[chan].min;
+					isChange = true;
+				}
+				if(ang[chan] > angLim[chan].max)
+				{
+					ang[chan] = angLim[chan].max;
+					isChange = true;
+				}
+
+				if(isChange)
+				{
+					pos = fiveBar.forwardKinematics(ang[0]+angOffset[0], ang[1]+angOffset[1]);
+					validatePositionAndDisplay(false);
+				}
+			}
+
+			function setDAng(chan)
+			{
+			       	ang[chan] = parseFloat(document.getElementById('sDAng'+chan).value); 
+				pos = fiveBar.forwardKinematics(ang[0]+angOffset[0], ang[1]+angOffset[1]);
+
+				validatePositionAndDisplay(false);
+			}
+
+			// deal with cartesian coordinates
+			function setXYRange(chan)
+			{
+				posLim[chan].min = parseFloat(document.getElementById('sXYMin'+chan).value);
+				posLim[chan].max = parseFloat(document.getElementById('sXYMax'+chan).value);
+
+				document.getElementById('sXYPos'+chan).min = posLim[chan].min;
+				document.getElementById('sXYPos'+chan).max = posLim[chan].max;
+
+				validatePositionAndDisplay(true);
+			}
+
+			function setXYPos(chan)
+			{
+			       	pos[chan] = parseFloat(document.getElementById('sXYPos'+chan).value); 
+
+				validatePositionAndDisplay(true);
+			}
+
+			function setPosition(x, y)
+			{
+				// assign
+				pos[0] = x;
+				pos[1] = y;
+
+				validatePositionAndDisplay(true);
+			}
+
+			function validatePositionAndDisplay(doReverse)
+			{
+				// range check
+				if(pos[0] < posLim[0].min)
+					pos[0] = posLim[0].min;
+				if(pos[0] > posLim[0].max)
+					pos[0] = posLim[0].max;
+
+				if(pos[1] < posLim[1].min)
+					pos[1] = posLim[1].min;
+				if(pos[1] > posLim[1].max)
+					pos[1] = posLim[1].max;
+
+				if(doReverse)
+				{
+					ang = fiveBar.reverseKinematics(pos[0], pos[1]);
+					ang[0] -= angOffset[0];
+					ang[1] -= angOffset[1];
+				}
+				soundServo.setPosition(ang[0], 0);
+				soundServo.setPosition(ang[1], 1);
+
+				// update display
+
+				document.getElementById('sXYPos0').value = pos[0];
+				document.getElementById('sXYPos1').value = pos[1];
+
+				document.getElementById('sXYDsp0').innerHTML = pos[0].toFixed(1);
+				document.getElementById('sXYDsp1').innerHTML = pos[1].toFixed(1);
+
+				document.getElementById('sDAng0').value = ang[0];
+				document.getElementById('sDAng1').value = ang[1];
+
+				document.getElementById('sDDsp0').innerHTML = ang[0].toFixed(3);
+				document.getElementById('sDDsp1').innerHTML = ang[1].toFixed(3);
+			}
+
+			function processMove()
+			{
+				if(!done)
+				{
+					// how far we hope to move, in inches
+					var dist = speed / 1000 * interval;
+
+					// how far we have to move in each direction
+					var x = target[0] - pos[0];
+					var y = target[1] - pos[1];
+
+					var len = Math.sqrt(x*x + y*y);
+					var distX = (x / len) * dist;
+					var distY = (y / len) * dist;
+
+					pos[0] += distX;
+					pos[1] += distY;
+
+					if(len < dist)
+					{
+						pos[0] = target[0];
+						pos[1] = target[1];
+						done = true;
+					}
+
+					validatePositionAndDisplay(true);
+				}
+			}
+
+			function inRange(x, y)
+			{
+				return x >= posLim[0].min &&
+				       x <= posLim[0].max &&
+				       y >= posLim[1].min &&
+				       y <= posLim[1].max;
+			}
+
+			function goToXY(x, y)
+			{
+				if(inRange(x,y))
+				{
+					target[0] = x; 
+					target[1] = y; 
+					document.getElementById('sXYTarget').innerHTML = ""+target[0].toFixed(1)+","+target[1].toFixed(1);
+					done = false;
+				}
+			}
+
+		</script>
+
+	</head>
+<body>
+	<H1>Servo Test</H1>
+	<span>
+		Sound
+		<input type="button" value="On" onclick="soundServo.setVolume(1.0)">
+		<input type="button" value="Off" onclick="soundServo.setVolume(0.0)">
+	</span><br><br>
+	Angle (deg)<br>
+	<span>
+		<input id='sDMin0' type="text" value=-80 onfocusout='setDRange(0)' size="5">
+		<input id='sDAng0' type="range" min=-80 max=60 step=0.5 value=0 oninput="setDAng(0)">
+		<input id='sDMax0' type="text" value=60 onfocusout='setDRange(0)' size="5">
+		[<span id='sDDsp0'>0</span>] deg
+	</span><br>
+	<span>
+		<input id='sDMin1' type="text" value=-60 onfocusout='setDRange(1)' size="5">
+		<input id='sDAng1' type="range" min=-60 max=80 step=0.5 value=0 oninput='setDAng(1)'>
+		<input id='sDMax1' type="text" value=80 onfocusout='setDRange(1)' size="5">
+		[<span id='sDDsp1'>0</span>] deg
+	</span><br><br>
+	Pos (x,y)<br>
+	<span>
+		<input id='sXYMin0' type="text" value=-4 onfocusout='setXYRange(0)' size="5">
+		<input id='sXYPos0' type="range" min=-4 max=4 step=0.1 value=0 oninput="setXYPos(0)">
+		<input id='sXYMax0' type="text" value=4 onfocusout='setXYRange(0)' size="5">
+		[<span id='sXYDsp0'>0</span>] in
+	</span><br>
+	<span>
+		<input id='sXYMin1' type="text" value=2 onfocusout='setXYRange(1)' size="5">
+		<input id='sXYPos1' type="range" min=2 max=7 step=0.1 value=0 oninput='setXYPos(1)'>
+		<input id='sXYMax1' type="text" value=7 onfocusout='setXYRange(1)' size="5">
+		[<span id='sXYDsp1'>0</span>] in
+	</span><br><br>
+	<span>
+		Speed (in/s)
+		<input id='mSpeed' type="text" value=0.5 onfocusout='speed = parseFloat(this.value)' size="5">
+		[<span id='sXYTarget'>0,0</span>]
+	</span><br>
+	<span>
+		<input type="button" value="Stop" onclick="initDraw(-1)">
+		<input type="button" value="Grid" onclick="initDraw(1)">
+		<input type="button" value="Sine" onclick="initDraw(2)">
+		<input type="button" value="Random" onclick="initDraw(3)">
+		<input type="button" value="Sweep" onclick="initDraw(5)">
+	</span><br>
+	<span>
+		<input type="button" value="Spyrograph" onclick="initDraw(4)">
+		<input type="text" value=96 onfocusout='outerTeeth = parseFloat(this.value)' size="5">
+		<input type="text" value=30 onfocusout='innerTeeth = parseFloat(this.value)' size="5">
+		<input type="text" value=0.95 onfocusout='innerPct = parseFloat(this.value)' size="5">
+	</span><br>
+</body>
+
